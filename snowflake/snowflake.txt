@@ -1,0 +1,70 @@
+CREATE DATABASE weather_new;
+USE DATABASE weather_new;
+CREATE SCHEMA weather_newschema;
+USE SCHEMA weather_newschema;
+
+create or replace WAREHOUSE weather_wh 
+WITH
+WAREHOUSE_SIZE="XSMALL"
+AUTO_SUSPEND = 300
+AUTO_RESUME = TRUE;
+USE WAREHOUSE weather_wh;
+
+
+CREATE OR REPLACE TABLE weather_newtable (
+    city STRING,
+    temperature FLOAT,
+    humidity FLOAT,
+    condition STRING,
+    timestamp TIMESTAMP_NTZ
+);
+DESCRIBE TABLE weather_newtable;
+
+CREATE OR REPLACE STORAGE INTEGRATION s3_newint
+TYPE = EXTERNAL_STAGE
+STORAGE_PROVIDER = 'S3'
+ENABLED = TRUE
+STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::404426648194:role/weatherNew_role'
+STORAGE_ALLOWED_LOCATIONS = ('s3://weather-lambda-bucket23/');
+
+desc integration s3_newint;
+
+
+CREATE OR REPLACE STAGE weatherNew_stage
+URL = 's3://weather-lambda-bucket23/'
+STORAGE_INTEGRATION = s3_newint;
+
+list @weatherNew_stage;
+
+SELECT * FROM weather_newtable;
+
+
+
+CREATE OR REPLACE PIPE weatherNew_pipe
+AUTO_INGEST = TRUE
+AS
+COPY INTO weather_newtable
+FROM (
+  SELECT 
+    $1:city::string,
+    $1:temperature::float,
+    $1:humidity::float,    
+    $1:condition::string,   
+    $1:timestamp::timestamp_ntz
+  FROM @weatherNew_stage
+)
+FILE_FORMAT = (TYPE = 'JSON');
+
+ALTER TABLE weather_table ADD COLUMN IF NOT EXISTS humidity FLOAT;
+ALTER TABLE weather_table ADD COLUMN IF NOT EXISTS condition STRING;
+
+truncate table weather_newtable;
+ALTER PIPE weatherNew_pipe REFRESH;
+
+select system$pipe_status('weatherNew_pipe');
+
+SELECT * FROM weatherNew_table 
+WHERE humidity IS NOT NULL 
+ORDER BY timestamp DESC;
+show pipes;
+SELECT * FROM weather_newtable;
